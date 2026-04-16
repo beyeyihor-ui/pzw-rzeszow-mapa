@@ -1,0 +1,379 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Wody PZW Okręg Rzeszów 2026 — мапа</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<style>
+:root {
+  --panel: #ffffff;
+  --text: #111827;
+  --muted: #6b7280;
+  --standard: #0891b2;
+  --nokill: #9333ea;
+  --river: #0891b2;
+  --gorski: #15803d;
+  --border: #e5e7eb;
+}
+* { box-sizing: border-box; }
+body { margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, sans-serif; }
+#map { height: 100vh; width: 100%; z-index: 1; }
+
+.info-panel {
+  position: absolute; top: 12px; left: 60px; right: 12px; z-index: 1000;
+  background: var(--panel); border-radius: 10px; padding: 10px 14px;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.15); max-width: 420px; font-size: 13px;
+}
+.info-panel h1 { margin: 0 0 2px 0; font-size: 15px; font-weight: 700; color: var(--text); }
+.info-panel .sub { color: var(--muted); font-size: 11px; }
+.legend { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 8px; font-size: 11px; }
+.legend-item { display: inline-flex; align-items: center; gap: 5px; }
+.legend-dot { width: 10px; height: 10px; border-radius: 50%; border: 2px solid white; box-shadow: 0 1px 2px rgba(0,0,0,0.3); }
+.legend-line { width: 18px; height: 3px; border-radius: 2px; }
+
+.popup-content { font-family: inherit; min-width: 240px; max-width: 320px; }
+.popup-content h3 { margin: 0 0 4px 0; font-size: 14px; font-weight: 700; line-height: 1.25; }
+.popup-content .meta { font-size: 11px; color: var(--muted); margin-bottom: 6px; display: flex; flex-wrap: wrap; gap: 6px; }
+.popup-content .meta span { padding: 2px 6px; background: #f3f4f6; border-radius: 4px; }
+.popup-content .badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 10px; font-weight: 700; margin-bottom: 6px; margin-right: 4px; text-transform: uppercase; letter-spacing: 0.03em; }
+.popup-content .badge.nokill { background: #f3e8ff; color: #7e22ce; }
+.popup-content .badge.obwod { background: #dbeafe; color: #1e40af; }
+.popup-content .body { font-size: 12px; line-height: 1.5; color: #374151; }
+.popup-content .rules { margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--border); font-size: 11px; color: #4b5563; line-height: 1.5; }
+.popup-content .rules strong { color: #111827; }
+.popup-content .rules ul { margin: 2px 0; padding-left: 16px; }
+.popup-content .rules li { margin-bottom: 2px; }
+.popup-content a { color: #0891b2; text-decoration: none; font-weight: 500; }
+
+.toggle-btn {
+  position: absolute; top: 12px; left: 12px; z-index: 1001;
+  background: var(--panel); border: none; width: 40px; height: 40px; border-radius: 8px;
+  box-shadow: 0 2px 10px rgba(0,0,0,0.15); cursor: pointer; font-size: 20px;
+  display: flex; align-items: center; justify-content: center;
+}
+.info-panel.hidden { display: none; }
+
+.river-loader {
+  position: absolute; bottom: 24px; left: 12px; z-index: 1000;
+  background: rgba(255,255,255,0.95); padding: 8px 14px; border-radius: 20px;
+  font-size: 12px; box-shadow: 0 2px 10px rgba(0,0,0,0.15);
+  display: flex; align-items: center; gap: 8px; transition: opacity 0.3s;
+}
+.river-loader.done { opacity: 0; pointer-events: none; }
+.river-loader .spinner { width: 12px; height: 12px; border: 2px solid #e5e7eb; border-top-color: var(--river); border-radius: 50%; animation: spin 0.8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+@media (max-width: 600px) {
+  .info-panel { top: 60px; left: 8px; right: 8px; max-width: none; }
+}
+</style>
+</head>
+<body>
+
+<button class="toggle-btn" id="toggle-panel" title="Показати/приховати панель">☰</button>
+
+<div class="info-panel" id="info-panel">
+  <h1>Wody PZW Okręg Rzeszów 2026</h1>
+  <div class="sub">49 zbiorników z TAB. II + 7 obwodów rybackich · джерело: офіційний wykaz PZW</div>
+  <div class="legend">
+    <span class="legend-item"><span class="legend-dot" style="background: #0891b2"></span>Zbiornik</span>
+    <span class="legend-item"><span class="legend-dot" style="background: #9333ea"></span>No-kill</span>
+    <span class="legend-item"><span class="legend-line" style="background: #0891b2"></span>Rzeki nizinne</span>
+    <span class="legend-item"><span class="legend-line" style="background: #15803d"></span>Potoki górskie</span>
+  </div>
+</div>
+
+<div class="river-loader" id="river-loader">
+  <div class="spinner"></div>
+  <span id="river-loader-text">Завантаження річок з OSM…</span>
+</div>
+
+<div id="map"></div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+
+const RZESZOW = [50.0357, 21.9902];
+
+const zbiorniki = [
+  { n: 'Zwięczyca', ha: 1.90, lat: 49.9938972, lng: 21.9686658, type: 'Zbiornik pożwirowy', rules: ['Zakaz łódek elektrycznych zdalnie sterowanych do wywożenia zanęt i przynęt'] },
+  { n: 'Błażkowa, Brzyska', ha: 29.94, lat: 49.8462524, lng: 21.3981578, type: '5 wyrobisk pożwirowych', rules: ['Zakaz zabierania i przetrzymywania karpi na stawie nr 4'] },
+  { n: 'Rakszawa Brzeźnik', ha: 2.30, lat: 50.1538096, lng: 22.2521133, type: '4 stawy', rules: ['<strong>ZAKAZ SPINNINGOWANIA</strong>', 'Zakaz palenia ognisk'] },
+  { n: 'Męciszów', ha: 32.00, lat: 50.1471209, lng: 21.4676432, type: '2 wyrobiska pożwirowe', rules: ['Zbiornik Nr 1: zakaz zabierania jesiotra'] },
+  { n: 'Stawy Głogów Młp.', ha: 3.20, lat: 50.1698452, lng: 21.9541825, type: '3 stawy', rules: ['Tylko od wschodu do zachodu słońca', 'Zakaz zabierania jesiotra'] },
+  { n: 'Stawy Trzciana', ha: 8.72, lat: 50.0878813, lng: 21.8337735, type: '2 stawy (Mały + Duży)', nokill: 'partial', rules: ['<strong>Duży staw = NO-KILL</strong>', 'Mały staw: Pro-Golf Sp. z o.o. parking', 'Zakaz spinningowania', 'Zakaz kopania w torfie', 'Od wschodu do zachodu słońca', 'Duży: całoroczny zakaz nęcenia rakietami/spombami/kobrami/procami', 'Duży: zakaz żywca i martwej rybki', 'Duży: obowiązkowa mata, podbierak, wypychacz, haki bezzadziorowe'] },
+  { n: 'Lipie I (CarpPub)', ha: 10.00, lat: 50.1158013, lng: 21.935427, type: 'Wyrobisko pożwirowe', nokill: true, rules: ['<strong>NO-KILL</strong>', 'Brzeg południowy wyłączony — tarlisko', 'Zakaz modeli sterowanych radiowo', 'Zakaz pływania i kąpieli', 'Zakaz wędkowania ze sprzętu pływającego', 'Mata, podbierak, haki bezzadziorowe', 'Dopuszcza się zabieranie leszcza'] },
+  { n: 'Mrowla - Lipie II', ha: 11.20, lat: 50.1094669, lng: 21.927978, type: 'Wyrobisko pożwirowe', rules: ['Dopuszcza się łodzie wiosłowe/elektryczne', 'Dopuszcza się łódki zanętowe zdalne'] },
+  { n: 'Mrowla III („Nerka")', ha: 3.57, lat: 50.11051, lng: 21.91789, type: 'Wyrobisko pożwirowe', nokill: true, rules: ['<strong>NO-KILL</strong> (łącznie ze śniętymi, nie dotyczy suma)', 'Mata, podbierak, wypychacz, haki bezzadziorowe', 'Tylko w dzień', 'Zakaz żywca i martwej rybki', 'Zakaz kąpieli, ognisk, kamperów', 'Całoroczny zakaz nęcenia', 'Tylko wyznaczony brzeg', 'Zakaz sprzętu pływającego (też łódek zanętowych)'] },
+  { n: 'Mrowla IV', ha: 18.01, lat: 50.10811, lng: 21.91918, type: 'Wyrobisko pożwirowe', rules: ['Zakaz kamperów/przyczep', 'Zakaz biwakowania', 'Zakaz łódek (także zanętowych)', 'Zakaz nęcenia 01.06-31.08', 'Zakaz kąpieli', 'Zakaz ogni otwartych poza miejscem wyznaczonym'] },
+  { n: 'Mrowla V', ha: 6.52, lat: 50.1070, lng: 21.9165, type: 'Wyrobisko pożwirowe', rules: ['Zakaz biwakowania i wjazdu przyczep/kamperów (wyjątek: zawody)', '<em>Координати апроксимовані у кластері Mrowla — уточни в разі потреби</em>'] },
+  { n: 'Zbiornik Cierpisz', ha: 4.22, lat: 50.1480537, lng: 21.7202786, type: 'Zbiornik zaporowy', rules: ['Zakaz zabierania leszcza do 35 cm', 'Limit dobowy leszcza: 5 szt.'] },
+  { n: 'Zbiornik Rzeszów (Zalew)', ha: 68.20, lat: 50.0135542, lng: 21.9951959, type: 'Zbiornik zaporowy', rules: ['Część obwodu Wisłok 3 — ujęcie wody dla m. Rzeszowa'] },
+  { n: 'Zbiornik Blizne', ha: 11.00, lat: 49.7417433, lng: 22.0096424, type: 'Zbiornik zaporowy', rules: ['Część obwodu Stobnica 1'] },
+  { n: 'Glinianka Dobrzechów', ha: 3.80, lat: 49.8776768, lng: 21.7576249, type: 'Wyrobisko', rules: ['Zakaz zabierania lina', 'Zakaz palenia ognisk poza miejscami wyznaczonymi', 'Zakaz wjazdu/parkowania po prawej stronie', 'Zakaz połowu od strony północnej (tarlisko i matecznik)', 'Zakaz zabierania jesiotra'] },
+  { n: 'Stawy Tarnawka', ha: 6.55, lat: 49.9510609, lng: 22.2273813, type: '5 stawów', rules: ['Dojazd tylko drogą Nadleśnictwa Kańczuga', '<strong>Zakaz spinningowania 01.01-30.04</strong> (okres ochronny szczupaka)', 'Stawy 4 i 5: całodobowo', 'Staw 3: zakaz wędkowania', 'Stawy 1 i 2: zakaz 22:00-5:00', 'Zakaz ognisk, namiotów na groblach', 'Zakaz sprzętu pływającego i łódek zanętowych'] },
+  { n: 'Strzegocice I i II', ha: 53.11, lat: 49.9510559, lng: 21.3224882, type: '2 wyrobiska pożwirowe', rules: ['Dopuszcza się łodzie wiosłowe/elektryczne + łódki zdalne'] },
+  { n: 'Zbiornik Floryda', ha: 3.00, lat: 50.2643446, lng: 22.3905486, type: '1 zbiornik', rules: [] },
+  { n: 'Rakszawa Górna', ha: 1.60, lat: 50.1620, lng: 22.2520, type: '2 stawy', rules: ['Staw nr 2: tylko w dzień', 'Staw nr 2: zakaz żywca i martwej rybki', 'Staw nr 2: zakaz brodzenia', 'Staw nr 2: zakaz sprzętu pływającego (oprócz łódek zdalnych)'] },
+  { n: 'Zbiorniki Łętownia', ha: 5.71, lat: 50.3240218, lng: 22.2323893, type: '2 wyrobiska pożwirowe', rules: [] },
+  { n: 'Staw Browarny', ha: 1.26, lat: 50.069865, lng: 22.2238546, type: '1 staw', nokill: true, rules: ['<strong>NO-KILL</strong> (nie dotyczy suma)', 'Mata, podbierak, środek odkażający, 1 wędka', 'Tylko w dzień', 'Zakaz wędkowania z brzegu północnego (ul. Konopnickiej) i zachodniego (ul. Cetnarskiego)', 'Zakaz żywca i martwej rybki, zakaz brodzenia', 'Zakaz środków pływających (oprócz łódek zdalnych)', 'Zakaz zabierania szczupaka powyżej 75 cm'] },
+  { n: 'Stawy w Weryni', ha: 15.77, lat: 50.2607518, lng: 21.8045471, type: '6 stawów', nokill: 'partial', rules: ['Tylko 1 zawody dziennie (zgoda ZO PZW)', 'Zakaz zabierania szczupaka i sandacza powyżej 70 cm', 'Kontrola przez Straż Rybacką i Miejską', '<strong>Zakaz spinningu i sztucznej muchy 01.01-30.04</strong> (dotyczy WSZYSTKICH stawów)', 'Zakaz kamperów/przyczep na parkingach', '<strong>Staw nr 1 = NO-KILL</strong>, mata, podbierak, haki bezzadziorowe, tylko w dzień', 'Staw nr 1: zakaz nocy', 'Staw nr 1: zakaz łódek (też elektrycznych)', 'Staw nr 1: zakaz nęcenia rakietami/spombami/kobrami', 'Staw nr 1: zakaz martwej i żywej ryby + brodzenia', 'Na grobli Nr 1↔Nr 2: zakaz w nocy'] },
+  { n: 'Stawy TC Dębica', ha: 3.00, lat: 50.0440, lng: 21.3940, type: '4 zbiorniki (A, B, C, D)', nokill: 'partial', rules: ['Tylko w dzień', 'Zbiornik "B" (środkowy): zakaz wędkowania indywidualnego (tylko zawody)', 'Zakaz podlodowego na A, B, C', 'Zbiornik A "Lubelski": zakaz zabierania leszcza', '<strong>Zbiornik C "Pawełkowy" = NO-KILL</strong>', 'Zbiornik D "Dziki Staw": dopuszcza się wędkowanie z lodu'] },
+  { n: 'Stawy Janda', ha: 1.70, lat: 50.000, lng: 21.400, type: '2 stawy', rules: ['Zasady ogólne', '<em>Dokładna lokalizacja niepotwierdzona — skoryguj w razie potrzeby</em>'] },
+  { n: 'Zbiornik Głuchów', ha: 4.20, lat: 50.0813376, lng: 22.272684, type: 'Zbiornik zaporowy', rules: ['Zakaz żywca i martwej rybki', 'Zakaz sprzętu pływającego (ponton, łódź)', 'Zakaz zabierania szczupaka powyżej 75 cm'] },
+  { n: 'Zbiornik Grand-Chotowa', ha: 4.90, lat: 50.0323088, lng: 21.2828826, type: 'Zbiornik zaporowy', nokill: 'partial', rules: ['<strong>NO-KILL dla ryb łososiowatych</strong>', 'Od korony zapory do mostu w Żdżary: <strong>tylko spinning i mucha</strong>', 'Haki i kotwice bezzadziorowe', 'Zakaz łowienia spod lodu', 'Zakaz połowu 01.09-31.01'] },
+  { n: 'Zbiornik Czyste', ha: 8.80, lat: 50.1459072, lng: 22.4766259, type: 'Zbiornik', rules: ['Część obwodu Wisłok 4', 'Zalew w Grodzisku Dolnym'] },
+  { n: 'Zbiornik Niedźwiadek', ha: 8.10, lat: 50.290, lng: 22.390, type: 'Zbiornik zaporowy', rules: ['Zakaz brodzenia przy spinningowaniu', 'Zakaz połowu z łodzi/środków pływających', 'Dopuszcza się łódki zanętowe', 'Zakaz parkowania wzdłuż brzegu', 'Zakaz ognia otwartego poza miejscami wyznaczonymi', 'Kampery/przyczepy tylko Pt 16:00 → Pn 10:00'] },
+  { n: 'Zbiornik Przychojec', ha: 1.00, lat: 50.303, lng: 22.399, type: 'Zbiornik', rules: [] },
+  { n: 'Zbiornik Jelna', ha: 0.61, lat: 50.2885545, lng: 22.3540504, type: 'Zbiornik zaporowy', rules: ['Część obwodu San 9'] },
+  { n: 'Glinianka Kolbuszowa', ha: 0.24, lat: 50.2431142, lng: 21.7908886, type: '1 zbiornik', rules: [] },
+  { n: 'Zbiornik Mokrzec (Pilzno)', ha: 145.00, lat: 49.964598, lng: 21.3347556, type: 'Zbiornik zaporowy', rules: ['<strong>Drugi co do wielkości w Okręgu!</strong>', 'Limit dobowy leszcza: 5 szt.', 'Część obwodu Wisłoka 3'] },
+  { n: 'Rzemień Stawy Nr 1 i 2', ha: 5.97, lat: 50.2368038, lng: 21.5147173, type: '2 stawy', nokill: true, rules: ['<strong>NO-KILL</strong> (wyjątek: sum zgodnie z zasadami ogólnymi)', 'Tylko w dzień', 'Staw nr 1 i 2: zakaz połowu nocnego', 'Zakaz łodzi i środków pływających + brodzenia', 'Dopuszcza się łódki zdalne do zanęty', 'Mata, podbierak, haki bezzadziorowe', 'Staw nr 1: zakaz metody gruntowej', 'Regulamin na tablicy'] },
+  { n: 'Rzemień Staw Nr 3', ha: 7.50, lat: 50.2360, lng: 21.5155, type: '1 staw', rules: ['Zakaz połowu w porze nocnej', 'Regulamin na tablicy'] },
+  { n: 'Zbiornik Rudnik N. Sanem', ha: 0.80, lat: 50.4640, lng: 22.2450, type: 'Zbiornik zaporowy', rules: ['Część obwodu San 9'] },
+  { n: 'Zbiornik Brzóza Królewska', ha: 2.50, lat: 50.238389, lng: 22.322596, type: 'Zbiornik zaporowy', rules: ['Część obwodu San 9'] },
+  { n: 'Zbiornik Ożanna', ha: 18.00, lat: 50.2822653, lng: 22.5142971, type: 'Zbiornik zaporowy', rules: ['Część obwodu San 9'] },
+  { n: 'Zbiornik Grodzisko Górne', ha: 0.80, lat: 50.1854115, lng: 22.4383874, type: 'Zbiornik zaporowy', rules: ['Część obwodu Wisłok 4'] },
+  { n: 'Zbiornik Struga, Ulanów', ha: 0.50, lat: 50.4900, lng: 22.2615, type: 'Zbiornik zaporowy', rules: ['Część obwodu San 9'] },
+  { n: 'Cmolas-Dąbrówki', ha: 0.07, lat: 50.2731465, lng: 21.7295252, type: '1 zbiornik', rules: [] },
+  { n: 'Wola Dalsza', ha: 26.00, lat: 50.1115313, lng: 22.2912883, type: '1 zbiornik', rules: ['Zakaz brodzenia', 'Zakaz kąpieli', 'Zakaz bojek (oprócz markerów na stałe z wędziskiem)', 'Zakaz zabierania leszcza', 'Zakaz zabierania szczupaka powyżej 75 cm'] },
+  { n: 'Stobierna ("Piątka")', ha: 5.05, lat: 50.1368005, lng: 22.1031748, type: '1 zbiornik', rules: ['Brzeg oznaczony na tablicy wyłączony (technologia)', 'Zakaz sprzętu pływającego i łódek zdalnych (technologia)', 'Zakaz ognisk, kopania brzegów', 'Zakaz kamperów/przyczep (wyjątek: zawody)'] },
+  { n: 'Czarna Sędziszowska', ha: 44.79, lat: 50.1189491, lng: 21.7590962, type: '2 wyrobiska pożwirowe', rules: ['<strong>Zakaz zabierania leszcza do 35 cm, limit 5 szt.</strong>', 'Zakaz parkowania samochodów/kamperów w czasie zawodów', 'Zakaz biwakowania na "cyplu" (dz. 2569/2, 2586/5)', 'Zakaz biwakowania Pn 10:00 → Pt 18:00 wokół zbiornika', 'Kopalnia Kruszgeo: zakaz 50 m od urządzeń'] },
+  { n: 'Świętoniowa', ha: 15.00, lat: 50.1900, lng: 22.6100, type: '3 zbiorniki', nokill: 'partial', rules: ['<strong>Zbiornik Nr 1 = NO-KILL</strong>', 'Nr 1: tylko w dzień, zakaz nocy', 'Nr 1: zakaz sprzętu pływającego (oprócz łódek zdalnych)', 'Nr 1: zakaz brodzenia, mata, podbierak, haki bezzadziorowe', 'Nr 2 i 3: zakaz sprzętu pływającego, zakaz kąpieli', 'Nr 2 i 3: zakaz ognisk nad zbiornikiem', 'Nr 2 i 3: zakaz zabierania szczupaka powyżej 75 cm'] },
+  { n: 'Zbiornik Kamionka', ha: 9.52, lat: 50.1338808, lng: 21.6704109, type: 'Zbiornik zaporowy', rules: ['Część obwodu Wisłoka 4 (na Tuszymce)'] },
+  { n: 'Zbiornik Nowa Wieś', ha: 3.20, lat: 50.1001079, lng: 22.0610428, type: 'Zbiornik zaporowy (Terliczka)', rules: ['Część obwodu Wisłok 4', 'Zbiornik na Wisłoku między Nową Wsią a Terliczką — ~12 km NE від Rzeszowa'] },
+  { n: 'Tama Żołynia', ha: 2.50, lat: 50.1495523, lng: 22.3257502, type: 'Zbiornik zaporowy', rules: ['Część obwodu Wisłok 4'] },
+  { n: 'Otałęż', ha: 22.34, lat: 50.349741, lng: 21.2506628, type: 'Wyrobisko pożwirowe', rules: ['Dostępny też dla wędkarzy Okr. Tarnów'] },
+  { n: 'Zbiornik Turza', ha: 2.67, lat: 50.2331234, lng: 22.0835228, type: '1 zbiornik', nokill: true, rules: ['<strong>NO-KILL</strong> (nie dotyczy suma)', 'Mata, podbierak, wypychacz, haki bezzadziorowe', 'Tylko w dzień', 'Zakaz łodzi i łódek zanętowych', 'Nęcenie tylko podajnikiem lub z ręki', 'Zakaz ognia otwartego (poza miejscem wyznaczonym)', 'Zakaz żywca i martwej rybki', 'Zakaz kąpieli (wyjątek: zawody MGKOSiR)'] }
+];
+
+const obwody = {
+  'Stobnica 1': { granice: 'Od źródeł do mostu drogowego na drodze Nr 991 w m. Lutcza', ha: 48.10, zbiorniki: 'Blizne' },
+  'Wisłok 3': { granice: 'Od ujścia rzeki Stobnica do mostu kolejowego w m. Rzeszów wraz ze zbiornikiem Rzeszów i rzeką Strug od mostu w Tyczynie', ha: 150.20, zbiorniki: 'Rzeszów (Zalew)' },
+  'Wisłok 4': { granice: 'Od mostu kolejowego w m. Rzeszów do ujścia do Sanu w m. Dębno', ha: 328.80, zbiorniki: 'Nowa Wieś, Czyste, Grodzisko Górne, Głuchów, Tama Żołynia' },
+  'Wisłoka 3': { granice: 'Od ujścia potoku Jodłówka do ujścia potoku Dulcza w m. Pilzno', ha: 180.70, zbiorniki: 'Mokrzec (Pilzno)' },
+  'Wisłoka 4': { granice: 'Od ujścia Dulczy do ujścia Tuszymki + Wielopolka w Ropczycach + Tuszymka', ha: 164.80, zbiorniki: 'Kamionka, Cierpisz' },
+  'Wisłoka 5': { granice: 'Od ujścia potoku Tuszymka do ujścia do Wisły', ha: 133.70, zbiorniki: 'brak' },
+  'San 9': { granice: 'Od ujścia rzeki Wisłok w m. Dębno do ujścia Tanwi w m. Ulanów', ha: 592.20, zbiorniki: 'Brzóza Królewska, Niedźwiadek, Ożanna, Jelna, Struga-Ulanów, Rudnik N. Sanem' }
+};
+
+const NIZINNE_RIVERS = ['Wisłok', 'Wisłoka', 'San'];
+const GORSKIE_RIVERS = ['Stobnica', 'Strug', 'Gwoźnica', 'Pstrągówka', 'Dulcza', 'Tuszymka', 'Wielopolka', 'Trzebośnica', 'Złota', 'Ruda'];
+
+// Межі дозволених ділянок PZW Rzeszów (з TAB. I та TAB. III офіційного wykaz)
+// Bbox підібрано так, щоб покрити тільки PZW Rzeszów sections і виключити:
+//  - Wisłok південніше Stobnicy (то PZW Krosno)
+//  - San південніше Dębno / північніше Ulanowa (то інші okręgi)
+//  - Wisłoka поза межами obwodów 3-5
+const RIVER_BOUNDS = {
+  'Wisłok':     { minLat: 49.80, maxLat: 50.26, minLng: 21.75, maxLng: 22.62 },
+  'Wisłoka':    { minLat: 49.85, maxLat: 50.50, minLng: 21.05, maxLng: 21.60 },
+  'San':        { minLat: 50.21, maxLat: 50.52, minLng: 22.20, maxLng: 22.80 },
+  'Stobnica':   { minLat: 49.60, maxLat: 49.95, minLng: 21.70, maxLng: 22.15 },
+  'Strug':      { minLat: 49.78, maxLat: 50.10, minLng: 21.92, maxLng: 22.20 },
+  'Gwoźnica':   { minLat: 49.68, maxLat: 49.98, minLng: 21.78, maxLng: 22.05 },
+  'Pstrągówka': { minLat: 49.78, maxLat: 50.00, minLng: 21.60, maxLng: 21.90 },
+  'Dulcza':     { minLat: 49.82, maxLat: 50.10, minLng: 21.15, maxLng: 21.40 },
+  'Tuszymka':   { minLat: 49.98, maxLat: 50.30, minLng: 21.45, maxLng: 21.80 },
+  'Wielopolka': { minLat: 49.80, maxLat: 50.20, minLng: 21.45, maxLng: 21.75 },
+  'Trzebośnica':{ minLat: 50.15, maxLat: 50.50, minLng: 22.05, maxLng: 22.40 },
+  'Złota':      { minLat: 50.20, maxLat: 50.50, minLng: 22.30, maxLng: 22.70 },
+  'Ruda':       { minLat: 49.85, maxLat: 50.30, minLng: 21.20, maxLng: 21.55 }
+};
+
+// Клипер — залишає тільки точки в межах bbox, розбиває сегмент на суб-сегменти
+function clipByBbox(coords, bbox) {
+  if (!bbox || !coords || !coords.length) return [coords];
+  const runs = [];
+  let current = [];
+  for (const p of coords) {
+    const inside = p[0] >= bbox.minLat && p[0] <= bbox.maxLat &&
+                   p[1] >= bbox.minLng && p[1] <= bbox.maxLng;
+    if (inside) {
+      current.push(p);
+    } else {
+      if (current.length >= 2) runs.push(current);
+      current = [];
+    }
+  }
+  if (current.length >= 2) runs.push(current);
+  return runs;
+}
+
+const map = L.map('map', { zoomControl: true }).setView([50.10, 22.00], 9);
+
+const voyager = L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', { attribution: '&copy; OpenStreetMap &copy; CartoDB', subdomains: 'abcd', maxZoom: 19 });
+const positron = L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', { attribution: '&copy; OpenStreetMap &copy; CartoDB', subdomains: 'abcd', maxZoom: 19 });
+const satellite = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { attribution: 'Tiles &copy; Esri', maxZoom: 19 });
+const topo = L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', { attribution: '&copy; OpenTopoMap (CC-BY-SA)', maxZoom: 17 });
+
+voyager.addTo(map);
+L.control.layers({ 'Мапа': voyager, 'Світла': positron, 'Супутник': satellite, 'Топо': topo }, null, { position: 'topright', collapsed: false }).addTo(map);
+
+function makeIcon(color, size = 22) {
+  return L.divIcon({
+    className: 'custom-marker',
+    html: `<div style="width:${size}px;height:${size}px;background:${color};border:3px solid white;border-radius:50%;box-shadow:0 2px 6px rgba(0,0,0,0.4);"></div>`,
+    iconSize: [size, size], iconAnchor: [size/2, size/2]
+  });
+}
+
+const iconStandard = makeIcon('#0891b2');
+const iconNokill = makeIcon('#9333ea');
+const iconHome = L.divIcon({
+  className: 'home-marker',
+  html: `<div style="font-size:28px;filter:drop-shadow(0 2px 4px rgba(0,0,0,0.3));">🏠</div>`,
+  iconSize: [32, 32], iconAnchor: [16, 28]
+});
+
+L.marker(RZESZOW, { icon: iconHome }).addTo(map)
+  .bindPopup('<div class="popup-content"><h3>🏠 Твоя локація</h3><div class="body">Czudecka 7/25, Rzeszów</div></div>');
+
+zbiorniki.forEach(z => {
+  const isNokill = z.nokill === true;
+  const partialNokill = z.nokill === 'partial';
+  const icon = isNokill ? iconNokill : iconStandard;
+
+  const badges = [];
+  if (isNokill) badges.push('<span class="badge nokill">NO-KILL</span>');
+  if (partialNokill) badges.push('<span class="badge nokill">NO-KILL (частково)</span>');
+
+  const rulesHTML = z.rules && z.rules.length ?
+    `<div class="rules"><strong>Obowiązujące zasady:</strong><ul>${z.rules.map(r => `<li>${r}</li>`).join('')}</ul></div>` : '';
+
+  const popupHTML = `
+    <div class="popup-content">
+      <h3>${z.n}</h3>
+      <div class="meta">
+        <span>📐 ${z.ha} ha</span>
+        <span>${z.type}</span>
+      </div>
+      ${badges.join('')}
+      ${rulesHTML}
+      <div style="margin-top:8px;font-size:11px;">
+        <a href="https://www.google.com/maps?q=${z.lat},${z.lng}" target="_blank">Google Maps →</a>
+      </div>
+    </div>
+  `;
+
+  L.marker([z.lat, z.lng], { icon })
+    .bindPopup(popupHTML, { maxWidth: 340 })
+    .bindTooltip(`${z.n} (${z.ha} ha)`, { direction: 'top', offset: [0, -10] })
+    .addTo(map);
+});
+
+function drawRiver(name, segments, isGorski) {
+  const color = isGorski ? '#15803d' : '#0891b2';
+  const weight = isGorski ? 2.5 : 3.5;
+  const bbox = RIVER_BOUNDS[name];
+
+  let infoHTML = '';
+  if (!isGorski) {
+    const matchingObwody = Object.entries(obwody).filter(([k]) => k.startsWith(name));
+    if (matchingObwody.length) {
+      infoHTML = matchingObwody.map(([k, v]) => `
+        <div style="margin-bottom:6px;"><span class="badge obwod">${k}</span> <b>${v.ha} ha</b><br>
+        <small style="color:#6b7280;">${v.granice}</small><br>
+        <small><b>Zbiorniki:</b> ${v.zbiorniki}</small></div>
+      `).join('');
+    }
+    infoHTML += '<div style="font-size:11px;color:#9ca3af;margin-top:4px;">Na mapie pokazano tylko odcinek w granicach obwodów PZW Rzeszów</div>';
+  } else {
+    infoHTML = `<div style="font-size:12px;color:#4b5563;">
+      <b>Wody górskie (kraina pstrąga i lipienia)</b><br>
+      Metoda: <b>muchowa, spinningowa</b><br>
+      Zakaz całkowity: <b>01.09 - 31.01</b>
+    </div>`;
+  }
+
+  let drawnCount = 0;
+  segments.forEach(coords => {
+    const clipped = clipByBbox(coords, bbox);
+    clipped.forEach(subSeg => {
+      L.polyline(subSeg, { color, weight, opacity: 0.85, smoothFactor: 1 })
+        .bindPopup(`<div class="popup-content"><h3>${name}</h3>${infoHTML}</div>`, { maxWidth: 340 })
+        .bindTooltip(name, { sticky: true })
+        .addTo(map);
+      drawnCount++;
+    });
+  });
+  return drawnCount;
+}
+
+async function loadRivers() {
+  const loader = document.getElementById('river-loader');
+  const loaderText = document.getElementById('river-loader-text');
+  const hideLoader = (msg) => {
+    if (msg) loaderText.textContent = msg;
+    setTimeout(() => loader.classList.add('done'), msg ? 2000 : 100);
+  };
+
+  const CACHE_KEY = 'pzw_rzeszow_rivers_v4';
+  const CACHE_TTL_DAYS = 60;
+
+  try {
+    const cached = JSON.parse(localStorage.getItem(CACHE_KEY) || 'null');
+    if (cached && (Date.now() - cached.ts) < CACHE_TTL_DAYS * 86400 * 1000) {
+      Object.entries(cached.data).forEach(([name, info]) => drawRiver(name, info.segs, info.gorski));
+      hideLoader('Русла завантажено з кешу ✓');
+      return;
+    }
+  } catch (e) {}
+
+  const allNames = [...NIZINNE_RIVERS, ...GORSKIE_RIVERS];
+  const namesRegex = allNames.join('|');
+  const query = `
+    [out:json][timeout:90];
+    way["waterway"~"river|stream|canal"]["name"~"^(${namesRegex})$"](49.40,21.00,50.60,22.80);
+    out geom;
+  `;
+
+  const endpoints = [
+    'https://overpass-api.de/api/interpreter',
+    'https://overpass.kumi.systems/api/interpreter',
+    'https://overpass.openstreetmap.fr/api/interpreter'
+  ];
+
+  let data = null;
+  for (const ep of endpoints) {
+    try {
+      const resp = await fetch(ep + '?data=' + encodeURIComponent(query), { mode: 'cors' });
+      if (resp.ok) { data = await resp.json(); break; }
+    } catch (e) {}
+  }
+
+  if (!data || !data.elements || !data.elements.length) {
+    hideLoader('OSM недоступний ⚠');
+    return;
+  }
+
+  const byName = {};
+  data.elements.forEach(w => {
+    if (!w.geometry) return;
+    const name = w.tags?.name;
+    if (!name) return;
+    const coords = w.geometry.map(p => [p.lat, p.lon]);
+    const isGorski = GORSKIE_RIVERS.includes(name);
+    if (!byName[name]) byName[name] = { segs: [], gorski: isGorski };
+    byName[name].segs.push(coords);
+  });
+
+  Object.entries(byName).forEach(([name, info]) => drawRiver(name, info.segs, info.gorski));
+
+  try {
+    localStorage.setItem(CACHE_KEY, JSON.stringify({ ts: Date.now(), data: byName }));
+  } catch (e) {}
+
+  hideLoader(`Русла завантажено ✓ (${Object.keys(byName).length} річок)`);
+}
+
+loadRivers();
+
+document.getElementById('toggle-panel').addEventListener('click', () => {
+  document.getElementById('info-panel').classList.toggle('hidden');
+});
+
+</script>
+</body>
+</html>
